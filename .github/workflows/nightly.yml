@@ -1,0 +1,52 @@
+name: nightly-package
+
+# 仅手动触发：拉取私有仓库 kisaragychihaya/llm-chat 并在 Windows 上打包。
+# 本仓库是公开仓库，标准 runner 免费不限分钟数，不消耗私有仓库的 Actions 额度。
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: '源码分支 / tag / commit（llm-chat）'
+        required: true
+        default: 'main'
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  SOURCE_REPO: kisaragychihaya/llm-chat
+
+jobs:
+  package:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout private source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.SOURCE_REPO }}
+          ref: ${{ inputs.ref }}
+          token: ${{ secrets.SOURCE_REPO_TOKEN }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # runtime/node.exe 未入库（gitignore），需现下载；不打这步产物里 midscene 不可用
+      - name: Fetch midscene node runtime
+        run: npm run fetch-node
+
+      - name: Package (electron-forge package)
+        run: npm run package
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VIrobotics-Harness-win32-x64
+          path: out/
+          if-no-files-found: error
+          retention-days: 7
