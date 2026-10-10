@@ -12,8 +12,4 @@ VIrobotics Harness 的 nightly 打包仓库。本仓库**不含源码**，仅存
 1. Actions → **nightly-package** → **Run workflow**，可指定源码 ref（默认 `main`）。
 2. 完成后在 run 页面下载 artifact。
 
-## 安全说明
 
-- 拉取私有仓库需要 PAT，存放于本仓库的 `SOURCE_REPO_TOKEN` secret（fork 的 PR 无法访问 secret）。
-- 产物中的 asar 已做 minify / 提示词 AES-256-GCM 加密 / 主进程字节码编译，属可公开分发的 nightly 形态。
-- 源码不出现在本仓库中，但构建日志公开可见；工作流仅在手动触发时运行。
