@@ -44,9 +44,41 @@ jobs:
       - name: Package (electron-forge package)
         run: npm run package
 
+      # 再签出本仓库（nsi 脚本 + 便携 NSIS 压缩包）到 packaging/ 子目录
+      - name: Checkout packaging scripts (this repo)
+        uses: actions/checkout@v4
+        with:
+          path: packaging
+
+      - name: Extract NSIS
+        run: 7z x packaging\nsis-binary-7423-3.7z -onsis -y
+
+      # setup.exe 的版本号取自源码仓库 package.json 的 version 字段
+      - name: Read version from source package.json
+        id: ver
+        run: |
+          $v = (node -p "require('./package.json').version").Trim()
+          # VIProductVersion 必须是 x.x.x.x 纯数字格式，取数字部分并补齐 4 段
+          $m = [regex]::Match($v, '\d+(\.\d+){0,3}')
+          $parts = [System.Collections.Generic.List[string]]($m.Value.Split('.'))
+          while ($parts.Count -lt 4) { $parts.Add('0') }
+          "version=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "version4=$($parts -join '.')" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Build setup.exe (NSIS)
+        run: |
+          $appDir = "${{ github.workspace }}\out\VIrobotics Harness-win32-x64"
+          if (-not (Test-Path $appDir)) { throw "electron-forge 产物目录不存在: $appDir" }
+          & .\nsis\nsis-binary-7423-3\makensis.exe `
+            "/DPRODUCT_VERSION=${{ steps.ver.outputs.version }}" `
+            "/DPRODUCT_VERSION4=${{ steps.ver.outputs.version4 }}" `
+            "/DAPP_SOURCE_DIR=$appDir" `
+            "/DSETUP_OUT_DIR=${{ github.workspace }}" `
+            packaging\vih.nsi
+
       - uses: actions/upload-artifact@v4
         with:
-          name: VIrobotics-Harness-win32-x64
-          path: out/
+          name: VIrobotics-Harness-Setup-v${{ steps.ver.outputs.version }}
+          path: VIrobotics-Harness-Setup-v${{ steps.ver.outputs.version }}.exe
           if-no-files-found: error
           retention-days: 7
