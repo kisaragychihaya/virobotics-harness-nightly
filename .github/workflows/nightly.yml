@@ -93,10 +93,13 @@ jobs:
           retention-days: 7
 
       # 仅在发布 release 时运行：把 setup.exe 挂到该 release 的附件里
+      # 注意：工作区根目录签出的是源码仓库，gh 会优先用 git remote 判断目标仓库，
+      # 所以必须用 --repo 显式指定本仓库
       - name: Upload setup.exe to release
         if: github.event_name == 'release'
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           gh release upload "${{ github.event.release.tag_name }}" `
             "VIrobotics-Harness-Setup-v${{ steps.ver.outputs.version }}.exe" `
