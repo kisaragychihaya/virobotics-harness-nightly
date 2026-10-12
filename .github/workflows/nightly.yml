@@ -1,6 +1,9 @@
 name: nightly-package
 
-# 仅手动触发：拉取私有仓库 kisaragychihaya/llm-chat 并在 Windows 上打包。
+# 两种方式触发：
+# 1. 手动触发：拉取私有仓库 kisaragychihaya/llm-chat 指定 ref 打包，产物仅存 Actions artifact
+# 2. 发布 release：用该 release 的 tag 签出源码仓库打包，setup.exe 自动上传到该 release
+#    （源码仓库需存在与 release 同名的 tag）
 # 本仓库是公开仓库，标准 runner 免费不限分钟数，不消耗私有仓库的 Actions 额度。
 on:
   workflow_dispatch:
@@ -10,9 +13,12 @@ on:
         required: true
         default: 'main'
         type: string
+  release:
+    types: [published]
 
 permissions:
-  contents: read
+  # write 用于 release 发布时上传附件；GITHUB_TOKEN 只对本仓库有效
+  contents: write
 
 env:
   SOURCE_REPO: kisaragychihaya/llm-chat
@@ -20,16 +26,19 @@ env:
 jobs:
   package:
     runs-on: windows-latest
+    env:
+      # release 事件用 release 的 tag 签出源码；手动触发用输入的 ref
+      SOURCE_REF: ${{ github.event.release.tag_name || inputs.ref }}
     steps:
       - name: Checkout private source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ${{ env.SOURCE_REPO }}
-          ref: ${{ inputs.ref }}
+          ref: ${{ env.SOURCE_REF }}
           token: ${{ secrets.SOURCE_REPO_TOKEN }}
           persist-credentials: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -46,7 +55,7 @@ jobs:
 
       # 再签出本仓库（nsi 脚本 + 便携 NSIS 压缩包）到 packaging/ 子目录
       - name: Checkout packaging scripts (this repo)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: packaging
 
@@ -76,9 +85,19 @@ jobs:
             "/DSETUP_OUT_DIR=${{ github.workspace }}" `
             packaging\vih.nsi
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: VIrobotics-Harness-Setup-v${{ steps.ver.outputs.version }}
           path: VIrobotics-Harness-Setup-v${{ steps.ver.outputs.version }}.exe
           if-no-files-found: error
           retention-days: 7
+
+      # 仅在发布 release 时运行：把 setup.exe 挂到该 release 的附件里
+      - name: Upload setup.exe to release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ github.event.release.tag_name }}" `
+            "VIrobotics-Harness-Setup-v${{ steps.ver.outputs.version }}.exe" `
+            --clobber
