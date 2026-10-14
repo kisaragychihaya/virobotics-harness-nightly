@@ -13,6 +13,11 @@ on:
         required: true
         default: 'main'
         type: string
+      visenv_whl_version:
+        description: 'viscriptpy wheel 版本（如 2026.9.22；留空用脚本内 pin 的默认版本）'
+        required: false
+        default: ''
+        type: string
   release:
     types: [published]
 
@@ -49,6 +54,14 @@ jobs:
       # runtime/node.exe 未入库（gitignore），需现下载；不打这步产物里 midscene 不可用
       - name: Fetch midscene node runtime
         run: npm run fetch-node
+
+      # CI runner 无本机 vis-env：用 embeddable Python 3.12 现场构建 runtime/vis-env
+      # （放开 ._pth + uv 装 pip + 商店 CDN 装 viscriptpy whl），产物即内置 Python 环境
+      - name: Build bundled vis-env (embeddable Python + pip + base whl)
+        env:
+          # 留空时回退脚本内 pin 的默认版本；release 事件无 inputs，恒为空
+          VISENV_WHL_VERSION: ${{ inputs.visenv_whl_version }}
+        run: npm run fetch-visenv:ci
 
       - name: Package (electron-forge package)
         run: npm run package
