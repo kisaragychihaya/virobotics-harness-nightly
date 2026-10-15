@@ -1,0 +1,90 @@
+name: build-sphinx-doc
+
+# 构建源码仓库 manual/ 下的 Sphinx 客户文档（uv 管理依赖，产物是纯静态 HTML）
+# 两种方式触发（与 nightly 打包保持一致）：
+# 1. 手动触发：构建指定 ref 的文档，产物存 Actions artifact
+# 2. 发布 release：用该 release 的 tag 签出源码仓库构建，HTML 压缩包挂到该 release
+#    （源码仓库需存在与 release 同名的 tag）
+# 本仓库是公开仓库，标准 runner 免费不限分钟数，不消耗私有仓库的 Actions 额度。
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: '源码分支 / tag / commit（llm-chat）'
+        required: true
+        default: 'main'
+        type: string
+  release:
+    types: [published]
+
+permissions:
+  # write 用于 release 发布时上传附件；GITHUB_TOKEN 只对本仓库有效
+  contents: write
+
+env:
+  SOURCE_REPO: kisaragychihaya/llm-chat
+
+jobs:
+  build-docs:
+    runs-on: ubuntu-latest
+    env:
+      # release 事件用 release 的 tag 签出源码；手动触发用输入的 ref
+      SOURCE_REF: ${{ github.event.release.tag_name || inputs.ref }}
+    steps:
+      - name: Checkout private source
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.SOURCE_REPO }}
+          ref: ${{ env.SOURCE_REF }}
+          token: ${{ secrets.SOURCE_REPO_TOKEN }}
+          persist-credentials: false
+
+      # 文档工程用 uv 管虚拟环境与依赖，CI 只需装上 uv；Python 版本对齐 manual/.python-version
+      # setup-uv 没有 v10 这类浮动大版本 tag，按上游 README 固定到提交 SHA（v10.3.0）
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884  # v10.3.0
+        with:
+          python-version: '3.13'
+          enable-cache: true
+
+      # --locked：严格按 uv.lock 装依赖，lock 与 pyproject.toml 不一致会直接失败
+      # （本地跑一次 uv sync 更新 lock 后提交即可）
+      - name: Sync dependencies
+        working-directory: manual
+        run: uv sync --locked
+
+      # 文档版本号取自文档工程的 pyproject.toml，用于产物命名
+      - name: Read docs version
+        id: ver
+        working-directory: manual
+        run: echo "version=$(uv version --short)" >> "$GITHUB_OUTPUT"
+
+      # -W 把任何 Sphinx 告警当错误，与 manual/build-docs.sh 的严格构建一致
+      - name: Build HTML (sphinx-build -W)
+        working-directory: manual
+        run: uv run --locked sphinx-build -b html -W --keep-going source build/html
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: VIrobotics-Harness-Manual-v${{ steps.ver.outputs.version }}
+          path: manual/build/html
+          if-no-files-found: error
+          retention-days: 7
+
+      # 仅在发布 release 时运行：把静态站点打成 zip 挂到该 release 的附件里
+      # zip 根目录即 index.html 等文件，解压后可直接上传到静态托管
+      - name: Package HTML as zip
+        if: github.event_name == 'release'
+        working-directory: manual/build/html
+        run: zip -rq "$GITHUB_WORKSPACE/VIrobotics-Harness-Manual-v${{ steps.ver.outputs.version }}.zip" .
+
+      # 注意：工作区根目录签出的是源码仓库，gh 会优先用 git remote 判断目标仓库，
+      # 所以必须用 GH_REPO 显式指定本仓库
+      - name: Upload docs zip to release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release upload "${{ github.event.release.tag_name }}" \
+            "VIrobotics-Harness-Manual-v${{ steps.ver.outputs.version }}.zip" \
+            --clobber
