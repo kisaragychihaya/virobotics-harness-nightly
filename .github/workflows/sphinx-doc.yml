@@ -59,9 +59,21 @@ jobs:
         run: echo "version=$(uv version --short)" >> "$GITHUB_OUTPUT"
 
       # -W 把任何 Sphinx 告警当错误，与 manual/build-docs.sh 的严格构建一致
+      # -d build/doctrees：增量构建缓存不要落进 build/html，那个目录要整包上传
       - name: Build HTML (sphinx-build -W)
         working-directory: manual
-        run: uv run --locked sphinx-build -b html -W --keep-going source build/html
+        run: uv run --locked sphinx-build -b html -W --keep-going -d build/doctrees source build/html
+
+      # 与 manual/build-docs.sh 一致的收尾步骤：折叠 HTML 空白（约 -13%）
+      # 旧 ref 上没有该脚本时跳过，保证手动触发历史 tag 仍能构建
+      - name: Minify HTML
+        working-directory: manual
+        run: |
+          if [ -f tools/minify_pages.py ]; then
+            uv run --locked python tools/minify_pages.py build/html
+          else
+            echo "tools/minify_pages.py 不存在，跳过 HTML 压缩"
+          fi
 
       - uses: actions/upload-artifact@v7
         with:
