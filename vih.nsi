@@ -28,6 +28,11 @@ SetCompressorDictSize 64
   !define SETUP_OUT_DIR "."
 !endif
 
+; setup.exe 文件名架构后缀，CI 按目标位数注入（x86 构建为 -x86）；默认空 = x64 命名不变。
+!ifndef SETUP_NAME_SUFFIX
+  !define SETUP_NAME_SUFFIX ""
+!endif
+
 !define PRODUCT_UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}"
 !define PRODUCT_UNINST_ROOT_KEY "HKLM"
 
@@ -58,7 +63,7 @@ SetCompressorDictSize 64
 ; MUI end ------
 
 Name "${PRODUCT_NAME} ${PRODUCT_VERSION}"
-OutFile "${SETUP_OUT_DIR}\VIrobotics-Harness-Setup-v${PRODUCT_VERSION}.exe"
+OutFile "${SETUP_OUT_DIR}\VIrobotics-Harness-Setup-v${PRODUCT_VERSION}${SETUP_NAME_SUFFIX}.exe"
 InstallDir "$PROGRAMFILES64\VIrobotics Harness"
 InstallDirRegKey HKLM "${PRODUCT_UNINST_KEY}" ""
 ShowInstDetails show

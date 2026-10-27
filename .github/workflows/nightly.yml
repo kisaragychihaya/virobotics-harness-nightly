@@ -1,8 +1,8 @@
 name: nightly-package
 
 # 两种方式触发：
-# 1. 手动触发：拉取私有仓库 kisaragychihaya/llm-chat 指定 ref 打包，产物仅存 Actions artifact
-# 2. 发布 release：用该 release 的 tag 签出源码仓库打包，setup.exe 自动上传到该 release
+# 1. 手动触发：拉取私有仓库 kisaragychihaya/llm-chat 指定 ref / 位数打包，产物仅存 Actions artifact
+# 2. 发布 release：用该 release 的 tag 签出源码仓库打包（恒 x64），setup.exe 自动上传到该 release
 #    （源码仓库需存在与 release 同名的 tag）
 # 本仓库是公开仓库，标准 runner 免费不限分钟数，不消耗私有仓库的 Actions 额度。
 on:
@@ -13,11 +13,14 @@ on:
         required: true
         default: 'main'
         type: string
-      visenv_whl_version:
-        description: 'viscriptpy wheel 版本（如 2026.9.22；留空用脚本内 pin 的默认版本）'
-        required: false
-        default: ''
-        type: string
+      arch:
+        description: '目标位数（vis-env 按此解密对应归档）。注意：x86 整机打包尚未验证（node-pty/koffi 32 位原生模块），vis-env 解密链路已就绪'
+        required: true
+        default: 'x64'
+        type: choice
+        options:
+          - x64
+          - x86
   release:
     types: [published]
 
@@ -27,6 +30,8 @@ permissions:
 
 env:
   SOURCE_REPO: kisaragychihaya/llm-chat
+  # 位数选择经环境变量进入解密/打包步骤：手动触发用输入，release 事件无 inputs 恒 x64
+  VISENV_ARCH: ${{ inputs.arch || 'x64' }}
 
 jobs:
   package:
@@ -55,18 +60,7 @@ jobs:
       - name: Fetch midscene node runtime
         run: npm run fetch-node
 
-      # CI runner 无本机 vis-env：用 embeddable Python 3.12 现场构建 runtime/vis-env
-      # （放开 ._pth + uv 装 pip + 商店 CDN 装 viscriptpy whl），产物即内置 Python 环境
-      - name: Build bundled vis-env (embeddable Python + pip + base whl)
-        env:
-          # 留空时回退脚本内 pin 的默认版本；release 事件无 inputs，恒为空
-          VISENV_WHL_VERSION: ${{ inputs.visenv_whl_version }}
-        run: npm run fetch-visenv:ci
-
-      - name: Package (electron-forge package)
-        run: npm run package
-
-      # 再签出本仓库（nsi 脚本 + 便携 NSIS 压缩包）到 packaging/ 子目录
+      # 再签出本仓库（nsi 脚本 + 便携 NSIS 压缩包 + 加密 vis-env 归档）到 packaging/ 子目录
       - name: Checkout packaging scripts (this repo)
         uses: actions/checkout@v7
         with:
@@ -74,6 +68,36 @@ jobs:
 
       - name: Extract NSIS
         run: 7z x packaging\nsis-binary-7423-3.7z -onsis -y
+
+      # 解析目标位数：electron 架构 token（x64/ia32）与 setup/artifact 命名后缀（空 / -x86）
+      - name: Resolve target arch
+        id: arch
+        run: |
+          if ($env:VISENV_ARCH -eq 'x86') {
+            "electron=ia32" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            "suffix=-x86" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          } elseif ($env:VISENV_ARCH -eq 'x64') {
+            "electron=x64" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            "suffix=" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          } else {
+            throw "未知位数 VISENV_ARCH=$env:VISENV_ARCH（期望 x64 / x86）"
+          }
+
+      # 内置 vis-env：本仓库 vis-env-<arch>.7z（AES-256 + 头加密，顶层目录 vis-env/），
+      # 密码存 secret VISENV_7Z_PASSWORD。按 VISENV_ARCH 选对应位数归档，解压到 runtime/
+      # 即得 runtime/vis-env/，随源码仓库 extraResource 进最终安装包（替代旧 CI 现场构建）。
+      # 解密后校验 python.exe 并打印 VERSION，缺失即失败
+      - name: Extract bundled vis-env (encrypted archive, by VISENV_ARCH)
+        env:
+          VISENV_7Z_PASSWORD: ${{ secrets.VISENV_7Z_PASSWORD }}
+        run: |
+          if (-not $env:VISENV_7Z_PASSWORD) { throw "缺少 secret VISENV_7Z_PASSWORD，无法解密内置 vis-env 归档" }
+          7z x "packaging\vis-env-$env:VISENV_ARCH.7z" -p"$env:VISENV_7Z_PASSWORD" -o"${{ github.workspace }}\runtime" -y
+          if (-not (Test-Path "runtime\vis-env\python.exe")) { throw "解密后缺少 runtime\vis-env\python.exe，请检查 vis-env-$env:VISENV_ARCH.7z 归档与 VISENV_7Z_PASSWORD 密码" }
+          Get-Content "runtime\vis-env\VERSION"
+
+      - name: Package (electron-forge package)
+        run: npm run package -- --arch=${{ steps.arch.outputs.electron }}
 
       # setup.exe 的版本号取自源码仓库 package.json 的 version 字段
       - name: Read version from source package.json
@@ -89,19 +113,20 @@ jobs:
 
       - name: Build setup.exe (NSIS)
         run: |
-          $appDir = "${{ github.workspace }}\out\VIrobotics Harness-win32-x64"
+          $appDir = "${{ github.workspace }}\out\VIrobotics Harness-win32-${{ steps.arch.outputs.electron }}"
           if (-not (Test-Path $appDir)) { throw "electron-forge 产物目录不存在: $appDir" }
           & .\nsis\nsis-binary-7423-3\makensis.exe `
             "/DPRODUCT_VERSION=${{ steps.ver.outputs.version }}" `
             "/DPRODUCT_VERSION4=${{ steps.ver.outputs.version4 }}" `
             "/DAPP_SOURCE_DIR=$appDir" `
             "/DSETUP_OUT_DIR=${{ github.workspace }}" `
+            "/DSETUP_NAME_SUFFIX=${{ steps.arch.outputs.suffix }}" `
             packaging\vih.nsi
 
       - uses: actions/upload-artifact@v7
         with:
-          name: VIrobotics-Harness-Setup-v${{ steps.ver.outputs.version }}
-          path: VIrobotics-Harness-Setup-v${{ steps.ver.outputs.version }}.exe
+          name: VIrobotics-Harness-Setup-v${{ steps.ver.outputs.version }}${{ steps.arch.outputs.suffix }}
+          path: VIrobotics-Harness-Setup-v${{ steps.ver.outputs.version }}${{ steps.arch.outputs.suffix }}.exe
           if-no-files-found: error
           retention-days: 7
 
@@ -115,5 +140,5 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           gh release upload "${{ github.event.release.tag_name }}" `
-            "VIrobotics-Harness-Setup-v${{ steps.ver.outputs.version }}.exe" `
+            "VIrobotics-Harness-Setup-v${{ steps.ver.outputs.version }}${{ steps.arch.outputs.suffix }}.exe" `
             --clobber
