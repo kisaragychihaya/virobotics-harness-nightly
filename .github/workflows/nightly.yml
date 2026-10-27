@@ -74,16 +74,6 @@ jobs:
           Copy-Item ia32-native\rg.exe $rg
           Get-ChildItem $pty, $rg -Recurse -File -Name
 
-      # x86 腿：midscene 桌面自动化闭包（@midscene/@computer-use/sharp/@img）上游无 ia32
-      # 原生件（libnut 仅 x64、libvips 无 ia32），源码侧 ia32 下本就不注册 midscene 工具、
-      # 不注入对应提示词段（src/midscene/capability.js）；这里物理剔除，避免 x64 二进制
-      # 混入 x86 包。主进程不 require 这些包（仅 runner spawn CLI 使用），剔除安全
-      - name: Remove x64-only midscene closure (x86 leg)
-        if: matrix.arch == 'x86'
-        run: |
-          Remove-Item -Recurse -Force node_modules\@midscene, node_modules\@computer-use, node_modules\sharp, node_modules\@img -ErrorAction SilentlyContinue
-          "midscene closure removed"
-
       # runtime/node.exe 未入库（gitignore），需现下载；不打这步产物里 midscene 不可用
       - name: Fetch midscene node runtime
         run: npm run fetch-node
