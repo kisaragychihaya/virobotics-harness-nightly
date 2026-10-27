@@ -20,7 +20,10 @@ env:
 
 jobs:
   build:
-    runs-on: windows-latest
+    # windows-2022 而非 windows-latest：latest 镜像已是 Visual Studio 18，
+    # node-pty 自带的 node-gyp 11.5 识别不了（find VS unknown version "undefined"），
+    # 2022 镜像的 VS2022(17.x) 是该 node-gyp 久经验证的组合
+    runs-on: windows-2022
     steps:
       - uses: actions/setup-node@v7
         with:
