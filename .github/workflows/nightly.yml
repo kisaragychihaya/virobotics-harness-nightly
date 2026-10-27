@@ -1,9 +1,10 @@
 name: nightly-package
 
 # 两种方式触发：
-# 1. 手动触发：拉取私有仓库 kisaragychihaya/llm-chat 指定 ref / 位数打包，产物仅存 Actions artifact
-# 2. 发布 release：用该 release 的 tag 签出源码仓库打包（恒 x64），setup.exe 自动上传到该 release
+# 1. 手动触发：拉取私有仓库 kisaragychihaya/llm-chat 指定 ref 打包，产物仅存 Actions artifact
+# 2. 发布 release：用该 release 的 tag 签出源码仓库打包，setup.exe 自动上传到该 release
 #    （源码仓库需存在与 release 同名的 tag）
+# 目标位数走矩阵：x64 / x86 双腿并行，各自解密对应 vis-env 归档并打出对应位数安装包。
 # 本仓库是公开仓库，标准 runner 免费不限分钟数，不消耗私有仓库的 Actions 额度。
 on:
   workflow_dispatch:
@@ -13,14 +14,6 @@ on:
         required: true
         default: 'main'
         type: string
-      arch:
-        description: '目标位数（vis-env 按此解密对应归档）。注意：x86 整机打包尚未验证（node-pty/koffi 32 位原生模块），vis-env 解密链路已就绪'
-        required: true
-        default: 'x64'
-        type: choice
-        options:
-          - x64
-          - x86
   release:
     types: [published]
 
@@ -30,15 +23,22 @@ permissions:
 
 env:
   SOURCE_REPO: kisaragychihaya/llm-chat
-  # 位数选择经环境变量进入解密/打包步骤：手动触发用输入，release 事件无 inputs 恒 x64
-  VISENV_ARCH: ${{ inputs.arch || 'x64' }}
 
 jobs:
   package:
     runs-on: windows-latest
+    strategy:
+      # 一条腿失败不拖垮另一条（x86 打包链路仍在验证期）
+      fail-fast: false
+      matrix:
+        arch: [x64, x86]
     env:
       # release 事件用 release 的 tag 签出源码；手动触发用输入的 ref
       SOURCE_REF: ${{ github.event.release.tag_name || inputs.ref }}
+      # 位数环境变量：vis-env 归档选择 + 目标架构（forge 裁剪、node.exe、npm 依赖位数对齐）
+      VISENV_ARCH: ${{ matrix.arch }}
+      TARGET_ARCH: ${{ matrix.arch == 'x86' && 'ia32' || 'x64' }}
+      npm_config_arch: ${{ matrix.arch == 'x86' && 'ia32' || 'x64' }}
     steps:
       - name: Checkout private source
         uses: actions/checkout@v7

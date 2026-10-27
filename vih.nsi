@@ -1,10 +1,16 @@
 ﻿; VIrobotics Harness NSIS installer script
 ; Based on rad.nsi
+;
+; 按用户安装（per-user）：装到 %LOCALAPPDATA%\Programs，卸载信息写 HKCU，快捷方式只建当前用户，
+; 全程无需管理员权限（RequestExecutionLevel user）。
 
 ; Maximum compression: LZMA solid with largest dictionary
 ; Must be set before any data (including MUI macros) is added
 SetCompressor /SOLID lzma
 SetCompressorDictSize 64
+
+; 按用户安装：不产生 UAC 提权要求
+RequestExecutionLevel user
 
 ; HM NIS Edit Wizard helper defines
 !define PRODUCT_NAME "VIrobotics Harness"
@@ -34,7 +40,7 @@ SetCompressorDictSize 64
 !endif
 
 !define PRODUCT_UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}"
-!define PRODUCT_UNINST_ROOT_KEY "HKLM"
+!define PRODUCT_UNINST_ROOT_KEY "HKCU"
 
 ; MUI 1.67 compatible ------
 !include "MUI2.nsh"
@@ -64,8 +70,9 @@ SetCompressorDictSize 64
 
 Name "${PRODUCT_NAME} ${PRODUCT_VERSION}"
 OutFile "${SETUP_OUT_DIR}\VIrobotics-Harness-Setup-v${PRODUCT_VERSION}${SETUP_NAME_SUFFIX}.exe"
-InstallDir "$PROGRAMFILES64\VIrobotics Harness"
-InstallDirRegKey HKLM "${PRODUCT_UNINST_KEY}" ""
+; 按用户安装：默认装到用户程序目录（无需提权），用户可在目录页改选
+InstallDir "$LOCALAPPDATA\Programs\VIrobotics Harness"
+InstallDirRegKey HKCU "${PRODUCT_UNINST_KEY}" ""
 ShowInstDetails show
 ShowUnInstDetails show
 
@@ -86,7 +93,7 @@ Section "MainSection" SEC01
 
   File /r "${APP_SOURCE_DIR}\*"
 
-  SetShellVarContext all
+  ; 不设 SetShellVarContext all：开始菜单/桌面快捷方式只建当前用户，避免提权
   CreateDirectory "$SMPROGRAMS\${PRODUCT_NAME}"
   CreateShortCut "$SMPROGRAMS\${PRODUCT_NAME}\${PRODUCT_NAME}.lnk" "$INSTDIR\VIrobotics Harness.exe"
   CreateShortCut "$DESKTOP\${PRODUCT_NAME}.lnk" "$INSTDIR\VIrobotics Harness.exe"
@@ -115,7 +122,7 @@ FunctionEnd
 
 Section Uninstall
 
-  SetShellVarContext all
+  ; 与安装侧一致：只清当前用户的快捷方式
   Delete "$DESKTOP\${PRODUCT_NAME}.lnk"
   Delete "$SMPROGRAMS\${PRODUCT_NAME}\${PRODUCT_NAME}.lnk"
   RMDir "$SMPROGRAMS\${PRODUCT_NAME}"
