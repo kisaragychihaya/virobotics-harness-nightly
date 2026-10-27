@@ -56,6 +56,24 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # x86 腿：node-pty / ripgrep 上游无 ia32 预编译（sharp 同理，暂不处理），
+      # 从本仓库常驻 release native-ia32 取预编译件放置（由 native-ia32 workflow 产出，
+      # 见 .github/workflows/native-ia32.yml；node-pty 加载序 build/Release → prebuilds/win32-ia32，
+      # ripgrep 运行期按 process.arch 解析 @vscode/ripgrep-win32-ia32/bin/rg.exe）
+      - name: Place ia32 native prebuilts (node-pty / ripgrep)
+        if: matrix.arch == 'x86'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download native-ia32 --repo ${{ github.repository }} -D ia32-native --clobber
+          $pty = "node_modules\node-pty\prebuilds\win32-ia32"
+          New-Item -ItemType Directory -Force $pty | Out-Null
+          Copy-Item ia32-native\pty.node, ia32-native\conpty.node, ia32-native\conpty_console_list.node, ia32-native\winpty-agent.exe, ia32-native\winpty.dll $pty
+          $rg = "node_modules\@vscode\ripgrep-win32-ia32\bin"
+          New-Item -ItemType Directory -Force $rg | Out-Null
+          Copy-Item ia32-native\rg.exe $rg
+          Get-ChildItem $pty, $rg -Recurse -File -Name
+
       # runtime/node.exe 未入库（gitignore），需现下载；不打这步产物里 midscene 不可用
       - name: Fetch midscene node runtime
         run: npm run fetch-node

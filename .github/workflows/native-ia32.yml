@@ -1,0 +1,68 @@
+name: native-ia32
+
+# 构建 x86 安装包缺失的 ia32 原生件，产物上传到本仓库常驻 release native-ia32，
+# 供 nightly 主打包 workflow 的 x86 腿下载放置（nightly.yml 的 Place ia32 native prebuilts 步）。
+# 上游不发 ia32 预编译，两份件来源：
+# - node-pty：取 node-pty@<VERSION> 源码，binding.gyp / winpty.gyp 的 Spectre 缓解
+#   置 false（规避 runner 未装 Spectre 缓解库导致的 MSB8040），node-gyp --arch=ia32 编译
+# - ripgrep：官方 BurntSushi/ripgrep 的 i686-pc-windows-msvc 发行包直接取 rg.exe
+# node-pty 升版或换 rg 版本时：改下方 env 后手动重跑（产物 --clobber 覆盖同名附件）。
+on:
+  workflow_dispatch:
+
+permissions:
+  # 创建/上传 release 附件
+  contents: write
+
+env:
+  NODE_PTY_VERSION: 1.1.0
+  RG_VERSION: 14.1.0
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      # --ignore-scripts：install 脚本（prebuild 下载 / 未打补丁的 node-gyp）会在
+      # Spectre 未打补丁时失败；补丁后由我们显式 node-gyp rebuild
+      - name: Build node-pty ia32 (node-gyp)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force ia32-build | Out-Null
+          cd ia32-build
+          npm pack "node-pty@$env:NODE_PTY_VERSION"
+          tar -xzf "node-pty-$env:NODE_PTY_VERSION.tgz"
+          cd package
+          npm install --ignore-scripts
+          (Get-Content binding.gyp) -replace "'SpectreMitigation': 'Spectre'", "'SpectreMitigation': 'false'" | Set-Content binding.gyp
+          (Get-Content deps\winpty\src\winpty.gyp) -replace "'SpectreMitigation': 'Spectre'", "'SpectreMitigation': 'false'" | Set-Content deps\winpty\src\winpty.gyp
+          npx --no-install node-gyp rebuild --arch=ia32
+
+      - name: Fetch rg.exe (i686-pc-windows-msvc)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out | Out-Null
+          Invoke-WebRequest -Uri "https://github.com/BurntSushi/ripgrep/releases/download/$env:RG_VERSION/ripgrep-$env:RG_VERSION-i686-pc-windows-msvc.zip" -OutFile rg.zip
+          Expand-Archive rg.zip -DestinationPath rg-out
+          Copy-Item "rg-out\ripgrep-$env:RG_VERSION-i686-pc-windows-msvc\rg.exe" out\rg.exe
+
+      - name: Collect artifacts & PE 校验（必须全部 ia32）
+        shell: pwsh
+        run: |
+          Copy-Item ia32-build\package\build\Release\pty.node out\
+          Copy-Item ia32-build\package\build\Release\conpty.node out\
+          Copy-Item ia32-build\package\build\Release\conpty_console_list.node out\
+          Copy-Item ia32-build\package\build\Release\winpty-agent.exe out\
+          Copy-Item ia32-build\package\build\Release\winpty.dll out\
+          node -e "const fs=require('fs');let bad=0;for(const f of fs.readdirSync('out')){const b=fs.readFileSync('out/'+f);const m=b.readUInt16LE(b.readUInt32LE(0x3c)+4);const ok=m===0x14c;console.log(f.padEnd(28),ok?'ia32 OK':'BAD 0x'+m.toString(16));if(!ok)bad=1}process.exit(bad)"
+
+      - name: Upload to native-ia32 release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create native-ia32 --title "ia32 native prebuilts" --notes "node-pty ${{ env.NODE_PTY_VERSION }} (node-gyp ia32) + ripgrep ${{ env.RG_VERSION }} (i686-pc-windows-msvc)；由 native-ia32 workflow 产出，nightly x86 腿消费" --latest=false 2>$null || echo "release native-ia32 已存在，直接覆盖附件"
+          gh release upload native-ia32 out\pty.node out\conpty.node out\conpty_console_list.node out\winpty-agent.exe out\winpty.dll out\rg.exe --clobber
+          gh release view native-ia32 --json assets --jq '.assets[].name'
