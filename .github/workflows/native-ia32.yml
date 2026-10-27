@@ -65,7 +65,9 @@ jobs:
       - name: Upload to native-ia32 release
         env:
           GH_TOKEN: ${{ github.token }}
+          # 本 workflow 无 checkout，gh 靠 GH_REPO 定位仓库（否则报 not a git repository）
+          GH_REPO: ${{ github.repository }}
         run: |
-          gh release create native-ia32 --title "ia32 native prebuilts" --notes "node-pty ${{ env.NODE_PTY_VERSION }} (node-gyp ia32) + ripgrep ${{ env.RG_VERSION }} (i686-pc-windows-msvc)；由 native-ia32 workflow 产出，nightly x86 腿消费" --latest=false 2>$null || echo "release native-ia32 已存在，直接覆盖附件"
+          gh release create native-ia32 --title "ia32 native prebuilts" --notes "node-pty ${{ env.NODE_PTY_VERSION }} (node-gyp ia32) + ripgrep ${{ env.RG_VERSION }} (i686-pc-windows-msvc)；由 native-ia32 workflow 产出，nightly x86 腿消费" --latest=false || echo "release native-ia32 已存在，直接覆盖附件"
           gh release upload native-ia32 out\pty.node out\conpty.node out\conpty_console_list.node out\winpty-agent.exe out\winpty.dll out\rg.exe --clobber
           gh release view native-ia32 --json assets --jq '.assets[].name'
