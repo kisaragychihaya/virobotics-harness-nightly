@@ -1,0 +1,125 @@
+name: policy-sign
+
+# 手动触发：用 secrets.POLICY_PRIVATE_KEY（Ed25519 私钥 PEM）对输入的策略字段签名，
+# 产出 cp.json + cp.sign（Actions artifact，保留 30 天），下载后人工上传到
+# http://assets.virobotics.net/cp/（两个文件成对替换，间隔尽量短，注意 CDN 缓存）。
+# 签名实现复用源码仓库的 scripts/sign-policy.js（单一事实来源，不在本仓库另写）；
+# 策略字段口径见源码仓库 docs/policy-cp-json.md。
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '策略版本号（正整数，必须大于线上当前版本，否则失败）'
+        required: true
+        type: string
+      licenseRecheckCron:
+        description: '许可证周期复查 cron，如 0 3 * * *（留空则不调度周期复查）'
+        required: false
+        type: string
+      hwidBlacklist:
+        description: '硬件序列号黑名单，逗号分隔（留空不拉黑；客户端缓存会保留至下一份新配置）'
+        required: false
+        type: string
+      logging:
+        description: '日志/诊断开关（unset = 客户端保持现状）'
+        required: true
+        default: 'unset'
+        type: choice
+        options:
+          - unset
+          - 'true'
+          - 'false'
+      expiresAt:
+        description: '过期时间 ISO 8601，如 2027-01-01T00:00:00Z（留空不过期）'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  sign:
+    runs-on: windows-latest
+    steps:
+      # 只需要 scripts/sign-policy.js 与 assets/policy-public.pem，但稀疏检出规则
+      # 维护成本高于省下的几秒，整仓浅克隆即可（私有源码，凭 SOURCE_REPO_TOKEN）
+      - name: Checkout private source (sign tool)
+        uses: actions/checkout@v7
+        with:
+          repository: kisaragychihaya/llm-chat
+          ref: main
+          token: ${{ secrets.SOURCE_REPO_TOKEN }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      # 组装策略 JSON：只放非空输入；version 必须大于线上当前版本（防回滚，线上拉不到则跳过比对）
+      - name: Build policy JSON from inputs
+        shell: bash
+        env:
+          IN_VERSION: ${{ inputs.version }}
+          IN_CRON: ${{ inputs.licenseRecheckCron }}
+          IN_BLACKLIST: ${{ inputs.hwidBlacklist }}
+          IN_LOGGING: ${{ inputs.logging }}
+          IN_EXPIRES: ${{ inputs.expiresAt }}
+        run: |
+          node --input-type=module -e '
+            import fs from "node:fs";
+            const p = { version: Number(process.env.IN_VERSION) };
+            if (!Number.isInteger(p.version) || p.version < 1) {
+              console.error("version 必须是正整数，实际:", process.env.IN_VERSION);
+              process.exit(1);
+            }
+            const res = await fetch("http://assets.virobotics.net/cp/cp.json", { signal: AbortSignal.timeout(15000) }).catch(() => null);
+            if (res && res.ok) {
+              const cur = await res.json();
+              if (Number.isInteger(cur.version) && p.version <= cur.version) {
+                console.error(`version 必须大于线上当前版本 ${cur.version}，实际 ${p.version}`);
+                process.exit(1);
+              }
+              console.log(`线上当前版本 ${cur.version} → 新版本 ${p.version}`);
+            } else {
+              console.log("线上 cp.json 拉取失败，跳过版本比对");
+            }
+            const cron = (process.env.IN_CRON || "").trim();
+            if (cron) p.licenseRecheckCron = cron;
+            const bl = (process.env.IN_BLACKLIST || "").split(",").map((s) => s.trim()).filter(Boolean);
+            if (bl.length) p.hwidBlacklist = bl;
+            if (process.env.IN_LOGGING !== "unset") p.logging = process.env.IN_LOGGING === "true";
+            const exp = (process.env.IN_EXPIRES || "").trim();
+            if (exp) p.expiresAt = exp;
+            fs.writeFileSync("policy-src.json", JSON.stringify(p, null, 2) + "\n");
+            console.log("---- policy-src.json ----");
+            console.log(fs.readFileSync("policy-src.json", "utf8"));
+          '
+
+      # 私钥只经环境变量落盘，绝不打印；用完即删（含失败路径）
+      - name: Write private key from secret
+        shell: bash
+        env:
+          POLICY_PRIVATE_KEY: ${{ secrets.POLICY_PRIVATE_KEY }}
+        run: |
+          printf '%s\n' "$POLICY_PRIVATE_KEY" > policy-private.pem
+          chmod 600 policy-private.pem
+
+      - name: Sign policy
+        shell: bash
+        run: node scripts/sign-policy.js policy-src.json --key policy-private.pem --out-dir dist
+
+      # 用入库公钥复核产物（签名工具本身已自校验，这里再用 openssl 独立验一遍）
+      - name: Verify with openssl
+        shell: bash
+        run: openssl pkeyutl -verify -pubin -inkey assets/policy-public.pem -rawin -in dist/cp.json -sigfile dist/cp.sign
+
+      - name: Shred private key
+        if: always()
+        shell: bash
+        run: rm -f policy-private.pem
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cp-signed-v${{ inputs.version }}
+          path: dist/
+          retention-days: 30
