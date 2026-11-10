@@ -87,7 +87,7 @@ jobs:
       - name: Extract NSIS
         run: 7z x packaging\nsis-binary-7423-3.7z -onsis -y
 
-      # 解析目标位数：electron 架构 token（x64/ia32）与 setup/artifact 命名后缀（空 / -x86）
+      # 解析目标位数：electron 架构 token（x64/ia32）与 setup/artifact 命名后缀（-amd64 / -x86）
       - name: Resolve target arch
         id: arch
         run: |
@@ -96,7 +96,7 @@ jobs:
             "suffix=-x86" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           } elseif ($env:VISENV_ARCH -eq 'x64') {
             "electron=x64" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-            "suffix=" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            "suffix=-amd64" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
           } else {
             throw "未知位数 VISENV_ARCH=$env:VISENV_ARCH（期望 x64 / x86）"
           }
