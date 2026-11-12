@@ -208,7 +208,7 @@ jobs:
           INPUT_TOKEN: ${{ secrets.EDM_TOKEN }}
           INPUT_FILES: VIrobotics-Harness-Setup-v${{ steps.ver.outputs.version }}${{ steps.arch.outputs.suffix }}.exe
           INPUT_DRIVE_NAME: 软件分享【对外】
-          INPUT_CHECK_NAME_MODE: overwrite
+          INPUT_CHECK_NAME_MODE: check_name_and_hash
         run: node packaging/.github/scripts/edm-upload.mjs
 
       # refresh_token 每次刷新会轮换（旧值约 7 天后失效），自动写回 Secret；
@@ -246,7 +246,7 @@ jobs:
           INPUT_TOKEN: ${{ secrets.EDM_TOKEN }}
           INPUT_FILES: dist/*.exe
           INPUT_DRIVE_NAME: 软件分享【对外】
-          INPUT_CHECK_NAME_MODE: overwrite
+          INPUT_CHECK_NAME_MODE: check_name_and_hash
         run: node .github/scripts/edm-upload.mjs
 
       - name: Update rotated refresh_token secret
