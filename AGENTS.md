@@ -14,7 +14,7 @@ VIrobotics Harness 的 nightly 打包仓库。本仓库不含应用源码：
 
 | 文件 | 触发 | 作用 |
 |---|---|---|
-| `nightly.yml` | workflow_dispatch / release published | 主打包：matrix x64/x86 并行，产出 setup.exe（存 artifact 7 天，release 时挂附件） |
+| `nightly.yml` | workflow_dispatch / release published | 主打包：matrix x64/x86 并行，产出 setup.exe（存 artifact 7 天，release 时挂附件并同步到企业网盘「软件分享【对外】」）；手动触发可勾选 `sync_latest_release_to_edm` 跳过构建、只同步最新 release 的 exe 到网盘 |
 | `native-ia32.yml` | workflow_dispatch（手动） | 编译 x86 腿缺的 ia32 原生件（node-pty / ripgrep），传到常驻 release `native-ia32` 供 nightly x86 腿下载 |
 | `sphinx-doc.yml` | workflow_dispatch / release published | 构建源码仓 manual/ 的 Sphinx 文档（uv 管依赖，已开 enable-cache） |
 | `policy-sign.yml` | workflow_dispatch（手动） | 用 Ed25519 私钥签策略 cp.json，产出 artifact 人工上传 CDN |
@@ -54,6 +54,7 @@ npx --yes yaml < .github/workflows/xxx.yml > /dev/null
 
 ## 红线
 
-- secret（`SOURCE_REPO_TOKEN`、`VISENV_7Z_PASSWORD`、`POLICY_PRIVATE_KEY`）只经 `env:` 进命令，绝不打印；policy-sign 的私钥用完即删（含失败路径，`if: always()`）。
+- secret（`SOURCE_REPO_TOKEN`、`VISENV_7Z_PASSWORD`、`POLICY_PRIVATE_KEY`、`EDM_TOKEN`）只经 `env:` 进命令，绝不打印；policy-sign 的私钥用完即删（含失败路径，`if: always()`）。
+- `EDM_TOKEN` 是阿里云盘企业版 token JSON（edm-action 项目 `edm-token login` 产出，含 `domain_id` + `refresh_token`）；`refresh_token` 每次刷新轮换，上传脚本检测到轮换会经 `SOURCE_REPO_TOKEN` 自动写回该 secret（写回步骤 `continue-on-error`，失败时看日志 warning 手动更新，旧值约 7 天后失效）。
 - 不要把 `npm ci` 换成 `npm install`：lockfile 严格安装是"缓存命中即跳装"成立的前提。
 - vis-env 归档更新必须与源码仓相应改动配套验证；`Extract bundled vis-env` 步对缺 `python.exe` / 密码错直接失败是预期行为。
