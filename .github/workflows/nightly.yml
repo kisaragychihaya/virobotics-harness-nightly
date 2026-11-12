@@ -209,6 +209,8 @@ jobs:
           INPUT_FILES: VIrobotics-Harness-Setup-v${{ steps.ver.outputs.version }}${{ steps.arch.outputs.suffix }}.exe
           INPUT_DRIVE_NAME: 软件分享【对外】
           INPUT_CHECK_NAME_MODE: check_name_and_hash
+          # 该域存储侧要求分片严格顺序上传（并发会报 PartNotSequential），并发只能为 1
+          INPUT_CONCURRENCY: 1
         run: node packaging/.github/scripts/edm-upload.mjs
 
       # refresh_token 每次刷新会轮换（旧值约 7 天后失效），自动写回 Secret；
@@ -247,6 +249,8 @@ jobs:
           INPUT_FILES: dist/*.exe
           INPUT_DRIVE_NAME: 软件分享【对外】
           INPUT_CHECK_NAME_MODE: check_name_and_hash
+          # 该域存储侧要求分片严格顺序上传（并发会报 PartNotSequential），并发只能为 1
+          INPUT_CONCURRENCY: 1
         run: node .github/scripts/edm-upload.mjs
 
       - name: Update rotated refresh_token secret
