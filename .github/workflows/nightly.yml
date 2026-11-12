@@ -53,8 +53,38 @@ jobs:
           node-version: 22
           cache: npm
 
+      # 恢复 node_modules 缓存。key 含位数（x86 腿会往里放 ia32 原生预编译件，两腿不能串）
+      # 与源码仓库 lockfile 哈希；命中即跳过 npm ci——setup-node 的 npm 缓存只省 tarball
+      # 下载，npm ci 仍要全量删装，缓存整个 node_modules 才能把这段开销压到一次 restore。
+      # restore/save 拆开用：只在 npm ci 成功后才落缓存，避免失败现场存成脏缓存后被命中
+      - name: Restore node_modules cache
+        id: nm-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('package-lock.json') }}
+
+      # Electron 二进制（electron-forge 打包时经 @electron/get 下载的 zip，约百 MB）：
+      # 其默认缓存目录即 %LOCALAPPDATA%\electron\Cache，按下载 URL 分目录、多版本共存
+      # 不冲突，故 key 放宽到 runner.os+arch 前缀即可跨 lockfile 复用旧条目
+      - name: Cache Electron binaries
+        uses: actions/cache@v4
+        with:
+          path: ~/AppData/Local/electron/Cache
+          key: electron-bin-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: electron-bin-${{ runner.os }}-${{ matrix.arch }}-
+
       - name: Install dependencies
+        if: steps.nm-cache.outputs.cache-hit != 'true'
         run: npm ci
+
+      # 与上面的 restore 对应：仅未命中且安装成功时落缓存
+      - name: Save node_modules cache
+        if: steps.nm-cache.outputs.cache-hit != 'true' && success()
+        uses: actions/cache/save@v4
+        with:
+          path: node_modules
+          key: ${{ steps.nm-cache.outputs.cache-primary-key }}
 
       # x86 腿：node-pty / ripgrep 上游无 ia32 预编译，从本仓库常驻 release native-ia32
       # 取预编译件放置（由 native-ia32 workflow 产出，见 .github/workflows/native-ia32.yml；
