@@ -2,7 +2,9 @@ name: nightly-package
 
 # 两种方式触发：
 # 1. 手动触发：拉取私有仓库 kisaragychihaya/llm-chat 指定 ref 打包，产物仅存 Actions artifact
+#    （勾选 sync_latest_release_to_edm 时跳过构建，只把最新 release 的 exe 同步到企业网盘）
 # 2. 发布 release：用该 release 的 tag 签出源码仓库打包，setup.exe 自动上传到该 release
+#    并同步到阿里云盘企业版（EDM）团队空间「软件分享【对外】」
 #    （源码仓库需存在与 release 同名的 tag）
 # 目标位数走矩阵：x64 / x86 双腿并行，各自解密对应 vis-env 归档并打出对应位数安装包。
 # 本仓库是公开仓库，标准 runner 免费不限分钟数，不消耗私有仓库的 Actions 额度。
@@ -14,6 +16,11 @@ on:
         required: true
         default: 'main'
         type: string
+      sync_latest_release_to_edm:
+        description: '跳过构建，只把最新 release 的 exe 同步到企业网盘（软件分享【对外】）'
+        required: false
+        default: false
+        type: boolean
   release:
     types: [published]
 
@@ -26,6 +33,8 @@ env:
 
 jobs:
   package:
+    # 手动触发且只要同步网盘时跳过整个构建
+    if: github.event_name != 'workflow_dispatch' || !inputs.sync_latest_release_to_edm
     runs-on: windows-latest
     strategy:
       # 一条腿失败不拖垮另一条（x86 打包链路仍在验证期）
@@ -190,3 +199,63 @@ jobs:
           gh release upload "${{ github.event.release.tag_name }}" `
             "VIrobotics-Harness-Setup-v${{ steps.ver.outputs.version }}${{ steps.arch.outputs.suffix }}.exe" `
             --clobber
+
+      # 同步到企业网盘：脚本来自 edm-action 项目（.github/scripts/edm-upload.mjs，零依赖）
+      - name: Upload setup.exe to EDM (软件分享【对外】)
+        if: github.event_name == 'release'
+        id: edm
+        env:
+          INPUT_TOKEN: ${{ secrets.EDM_TOKEN }}
+          INPUT_FILES: VIrobotics-Harness-Setup-v${{ steps.ver.outputs.version }}${{ steps.arch.outputs.suffix }}.exe
+          INPUT_DRIVE_NAME: 软件分享【对外】
+          INPUT_CHECK_NAME_MODE: overwrite
+        run: node packaging/.github/scripts/edm-upload.mjs
+
+      # refresh_token 每次刷新会轮换（旧值约 7 天后失效），自动写回 Secret；
+      # SOURCE_REPO_TOKEN 需有本仓库 secret 写权限，失败不阻断构建（日志 warning 里有新 token 可手动更新）
+      - name: Update rotated refresh_token secret
+        if: github.event_name == 'release' && steps.edm.outputs.refresh_token != ''
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.SOURCE_REPO_TOKEN }}
+          NEW_RT: ${{ steps.edm.outputs.refresh_token }}
+          OLD_TOKEN: ${{ secrets.EDM_TOKEN }}
+        run: |
+          NEW=$(printf '%s' "$OLD_TOKEN" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const t=JSON.parse(s);t.refresh_token=process.env.NEW_RT;console.log(JSON.stringify(t))})")
+          printf '%s' "$NEW" | gh secret set EDM_TOKEN --repo "${{ github.repository }}"
+
+  # 手动触发 + 勾选 sync_latest_release_to_edm：不构建，直接下载最新 release 的全部 exe 同步到企业网盘
+  sync-edm:
+    if: github.event_name == 'workflow_dispatch' && inputs.sync_latest_release_to_edm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download latest release exes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p dist
+          gh release download --repo "${{ github.repository }}" --pattern "*.exe" --dir dist --clobber
+          ls -lh dist
+
+      - name: Upload to EDM (软件分享【对外】)
+        id: edm
+        env:
+          INPUT_TOKEN: ${{ secrets.EDM_TOKEN }}
+          INPUT_FILES: dist/*.exe
+          INPUT_DRIVE_NAME: 软件分享【对外】
+          INPUT_CHECK_NAME_MODE: overwrite
+        run: node .github/scripts/edm-upload.mjs
+
+      - name: Update rotated refresh_token secret
+        if: steps.edm.outputs.refresh_token != ''
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.SOURCE_REPO_TOKEN }}
+          NEW_RT: ${{ steps.edm.outputs.refresh_token }}
+          OLD_TOKEN: ${{ secrets.EDM_TOKEN }}
+        run: |
+          NEW=$(printf '%s' "$OLD_TOKEN" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const t=JSON.parse(s);t.refresh_token=process.env.NEW_RT;console.log(JSON.stringify(t))})")
+          printf '%s' "$NEW" | gh secret set EDM_TOKEN --repo "${{ github.repository }}"
