@@ -55,6 +55,6 @@ npx --yes yaml < .github/workflows/xxx.yml > /dev/null
 ## 红线
 
 - secret（`SOURCE_REPO_TOKEN`、`VISENV_7Z_PASSWORD`、`POLICY_PRIVATE_KEY`、`EDM_TOKEN`）只经 `env:` 进命令，绝不打印；policy-sign 的私钥用完即删（含失败路径，`if: always()`）。
-- `EDM_TOKEN` 是阿里云盘企业版 token JSON（edm-action 项目 `edm-token login` 产出，含 `domain_id` + `refresh_token`）；`refresh_token` 每次刷新轮换，上传脚本检测到轮换会经 `SOURCE_REPO_TOKEN` 自动写回该 secret（写回步骤 `continue-on-error`，失败时看日志 warning 手动更新，旧值约 7 天后失效）。
+- `EDM_TOKEN` 是阿里云盘企业版 token JSON（edm-action 项目 `edm-token login` 产出，含 `domain_id` + `refresh_token`）；`refresh_token` 每次刷新轮换，上传脚本检测到轮换会经 `SOURCE_REPO_TOKEN` 自动写回该 secret（写回步骤 `continue-on-error`，失败时看日志 warning 手动更新，旧值约 7 天后失效）。nightly matrix 两腿会各自轮换出不同的新 token，写回只由 x64 腿执行，避免互相覆盖把已作废的分支写进 secret。
 - 不要把 `npm ci` 换成 `npm install`：lockfile 严格安装是"缓存命中即跳装"成立的前提。
 - vis-env 归档更新必须与源码仓相应改动配套验证；`Extract bundled vis-env` 步对缺 `python.exe` / 密码错直接失败是预期行为。

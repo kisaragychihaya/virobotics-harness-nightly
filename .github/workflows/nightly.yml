@@ -214,9 +214,11 @@ jobs:
         run: node packaging/.github/scripts/edm-upload.mjs
 
       # refresh_token 每次刷新会轮换（旧值约 7 天后失效），自动写回 Secret；
+      # 写回只由 x64 腿做：两腿并行会各自拿同一个旧 token 轮换出不同的新 token，
+      # 都去写的话后写者可能把已作废的分支覆盖上去，下次运行刷新直接失败
       # SOURCE_REPO_TOKEN 需有本仓库 secret 写权限，失败不阻断构建（日志 warning 里有新 token 可手动更新）
       - name: Update rotated refresh_token secret
-        if: github.event_name == 'release' && steps.edm.outputs.refresh_token != ''
+        if: github.event_name == 'release' && matrix.arch == 'x64' && steps.edm.outputs.refresh_token != ''
         continue-on-error: true
         shell: bash
         env:
